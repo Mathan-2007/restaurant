@@ -10,6 +10,7 @@ const schema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   COOKIE_SECURE: z.enum(['true', 'false']).default('false'),
   LOG_LEVEL: z.string().default('info'),
+  PRINT_BRIDGE_URL: z.string().url().optional(),
 });
 
 export const env = schema.parse(process.env);

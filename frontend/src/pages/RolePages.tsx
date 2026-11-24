@@ -1,13 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell, Coins, ReceiptText, Search, Store, UtensilsCrossed, Warehouse } from 'lucide-react'
+import { apiClient } from '../services/apiClient'
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
-async function api(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${apiUrl}${path}`, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } })
-  const body = await response.json().catch(() => ({ success: false }))
-  if (!response.ok) throw new Error(body.error?.message || 'Request failed')
-  return body.data
-}
+const api = apiClient
 
 function PageHeader({ title, subtitle, action }: { title: string; subtitle: string; action?: string }) {
   return <div className="operation-page-heading"><div><p className="eyebrow">Operations</p><h2>{title}</h2><span>{subtitle}</span></div>{action && <button className="primary-button compact">{action}</button>}</div>

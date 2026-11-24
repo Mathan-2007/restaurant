@@ -25,6 +25,18 @@ export function requireRole(...roles: RoleName[]): RequestHandler {
   };
 }
 
+export function requirePermission(module: string, action: 'VIEW' | 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'APPROVE' | 'REJECT' | 'EXPORT' | 'IMPORT' | 'MANAGE' | 'OVERRIDE'): RequestHandler {
+  return async (req, _res, next) => {
+    try {
+      if (!req.auth) throw new ApiError(401, 'Authentication required', 'AUTH_REQUIRED');
+      if (req.auth.role === 'ADMIN') return next();
+      const permission = await prisma.permission.findUnique({ where: { roleName_module_action: { roleName: req.auth.role, module: module.toUpperCase(), action } } });
+      if (!permission?.allowed) throw new ApiError(403, 'Permission denied', 'PERMISSION_DENIED');
+      next();
+    } catch (error) { next(error); }
+  };
+}
+
 export async function canAccessShop(userId: string, role: RoleName, shopId: string) {
   if (role === 'ADMIN') return true;
   if (role === 'MANAGER') return !!await prisma.managerShopAssignment.findUnique({ where: { userId_shopId: { userId, shopId } } });

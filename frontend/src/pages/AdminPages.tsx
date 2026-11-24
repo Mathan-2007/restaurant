@@ -2,13 +2,10 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Activity, Building2, Download, IndianRupee, Search, Settings, ShieldCheck, Store, UserCog, Users } from 'lucide-react'
+import { apiClient } from '../services/apiClient'
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 async function adminApi(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${apiUrl}/api/admin${path}`, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } })
-  const body = await response.json().catch(() => ({ success: false }))
-  if (!response.ok) throw new Error(body.error?.message || 'Request failed')
-  return body.data
+  return apiClient(`/api/admin${path}`, options)
 }
 
 function Header({ title, subtitle, action }: { title: string; subtitle: string; action?: string }) {

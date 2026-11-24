@@ -99,27 +99,41 @@ model Role {
 }
 
 model User {
-  id                  String                   @id @default(cuid())
-  email               String                   @unique
-  passwordHash        String
-  fullName            String
-  phone               String?
-  status              EmployeeStatus           @default(ACTIVE)
-  archivedAt          DateTime?
-  forcePasswordChange Boolean                  @default(false)
-  roleId              String
-  role                Role                     @relation(fields: [roleId], references: [id])
-  employeeAssignments EmployeeShopAssignment[]
-  managerAssignments  ManagerShopAssignment[]
-  profile             EmployeeProfile?
-  shifts              Shift[]
-  sessions            Session[]
-  taskAssignments     TaskAssignmentMember[]
-  ordersCreated       Order[]                  @relation("OrderCreator")
-  revisions           OrderRevision[]
-  auditLogs           AuditLog[]
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  id                       String                   @id @default(cuid())
+  email                    String                   @unique
+  passwordHash             String
+  fullName                 String
+  phone                    String?
+  status                   EmployeeStatus           @default(ACTIVE)
+  archivedAt               DateTime?
+  forcePasswordChange      Boolean                  @default(false)
+  roleId                   String
+  role                     Role                     @relation(fields: [roleId], references: [id])
+  employeeAssignments      EmployeeShopAssignment[]
+  managerAssignments       ManagerShopAssignment[]
+  profile                  EmployeeProfile?
+  shifts                   Shift[]
+  sessions                 Session[]
+  taskAssignments          TaskAssignmentMember[]
+  ordersCreated            Order[]                  @relation("OrderCreator")
+  revisions                OrderRevision[]
+  auditLogs                AuditLog[]
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  failedLoginAttempts      Int                      @default(0)
+  lockoutEnd               DateTime?
+  passwordChangedAt        DateTime?
+  passwordResetToken       String?                  @unique
+  passwordResetExpires     DateTime?
+  emailVerified            Boolean                  @default(false)
+  emailVerificationToken   String?                  @unique
+  emailVerificationExpires DateTime?
+  phoneVerified            Boolean                  @default(false)
+  phoneVerificationToken   String?                  @unique
+  phoneVerificationExpires DateTime?
+  shopId                   String?
+  shop                     Shop?                    @relation(fields: [shopId], references: [id])
+  sequenceNumber           Int                      @default(0)
 
   @@index([roleId, status])
 }
@@ -148,6 +162,7 @@ model Shop {
   updatedAt           DateTime                 @updatedAt
   TableArea           TableArea[]
   TableArchive        TableArchive[]
+  User                User[]
 }
 
 model ShopSettings {
@@ -225,14 +240,16 @@ model TaskTemplateChecklist {
 }
 
 model TaskSchedule {
-  id             String       @id @default(cuid())
-  templateId     String
-  template       TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  shopId         String
-  startsAt       DateTime
-  endsAt         DateTime
-  recurrenceRule String?
-  active         Boolean      @default(true)
+  id               String       @id @default(cuid())
+  templateId       String
+  template         TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  shopId           String
+  startsAt         DateTime
+  endsAt           DateTime
+  recurrenceRule   String?
+  active           Boolean      @default(true)
+  lastGeneratedAt  DateTime?
+  nextOccurrenceAt DateTime?
 
   @@index([shopId, startsAt, active])
 }
@@ -253,6 +270,7 @@ model TaskAssignment {
   photoRequired      Boolean                @default(false)
   requiredPhotoCount Int                    @default(0)
   approvalRequired   Boolean                @default(false)
+  occurrenceKey      String?                @unique
   members            TaskAssignmentMember[]
   checklists         TaskChecklist[]
   photoEvidence      TaskPhotoEvidence[]
@@ -486,29 +504,34 @@ model KitchenTicketItem {
 }
 
 model Printer {
-  id         String     @id @default(cuid())
-  shopId     String
-  name       String
-  paperWidth Int        @default(80)
-  type       String
-  ipAddress  String?
-  active     Boolean    @default(true)
-  printJobs  PrintJob[]
+  id                 String     @id @default(cuid())
+  shopId             String
+  name               String
+  paperWidth         Int        @default(80)
+  type               String
+  ipAddress          String?
+  bridgeUrl          String?
+  bridgeKeyEncrypted String?
+  active             Boolean    @default(true)
+  printJobs          PrintJob[]
 }
 
 model PrintJob {
-  id        String        @id @default(cuid())
-  shopId    String
-  printerId String
-  printer   Printer       @relation(fields: [printerId], references: [id])
-  ticketId  String
-  ticket    KitchenTicket @relation(fields: [ticketId], references: [id])
-  status    PrintStatus   @default(PENDING)
-  payload   String        @db.Text
-  attempts  Int           @default(0)
-  lastError String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id            String        @id @default(cuid())
+  shopId        String
+  printerId     String
+  printer       Printer       @relation(fields: [printerId], references: [id])
+  ticketId      String
+  ticket        KitchenTicket @relation(fields: [ticketId], references: [id])
+  status        PrintStatus   @default(PENDING)
+  payload       String        @db.Text
+  attempts      Int           @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  claimedAt     DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@index([shopId, status, createdAt])
 }
@@ -662,12 +685,17 @@ model AuditLog {
 }
 
 model IdempotencyKey {
-  id         String   @id @default(cuid())
-  key        String   @unique
-  scope      String
-  resultJson Json?
-  createdAt  DateTime @default(now())
-  expiresAt  DateTime
+  id          String   @id @default(cuid())
+  key         String   @unique
+  scope       String
+  actorId     String?
+  shopId      String?
+  fingerprint String?
+  resultJson  Json?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([scope, actorId, shopId])
 }
 
 model OutboxEvent {
@@ -811,7 +839,7 @@ model Permission {
   action    String
   allowed   Boolean  @default(false)
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now())
 
   @@unique([roleName, module, action])
   @@index([roleName, module])
@@ -965,4 +993,15 @@ model BackupRecord {
   status      String   @default("COMPLETED")
   createdById String
   createdAt   DateTime @default(now())
+}
+
+model NumberSequence {
+  id        String   @id @default(cuid())
+  scope     String
+  prefix    String
+  year      Int?
+  lastValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, prefix, year])
 }

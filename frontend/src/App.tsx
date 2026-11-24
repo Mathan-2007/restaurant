@@ -1,21 +1,16 @@
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, BarChart3, Bell, ChefHat, ClipboardCheck, IndianRupee, LayoutDashboard, LogOut, ReceiptText, ShieldCheck, ShoppingCart, Store, UserCog, Users, UtensilsCrossed, Warehouse } from 'lucide-react'
 import { ManagerPages, KitchenPage, WaiterPage, CashierPage, NotificationsPage, ReservationsPage, WaitingQueuePage, CashSessionPage, RefundPage, InventoryChecksPage } from './pages/RolePages'
 import { AdminExecutiveDashboard, AdminBranches, AdminUsers, AdminProcurement, AdminFinance, AdminAnalytics, AdminAdministration, AdminLiveOperations } from './pages/AdminPages'
 import './App.css'
+import { apiClient, setCsrfToken as setApiCsrfToken } from './services/apiClient'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
 type User = { id: string; name: string; email: string; role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'WAITER' | 'KITCHEN_STAFF'; employeeShops: Shop[]; managerShops: Shop[] }
 type Shop = { id: string; code: string; name: string }
-
-async function api(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${apiUrl}${path}`, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } })
-  const body = await response.json().catch(() => ({ success: false }))
-  if (!response.ok) throw new Error(body.error?.message || 'Request failed')
-  return body.data
-}
 
 function App() {
   const [csrfToken, setCsrfToken] = useState('')
@@ -23,36 +18,36 @@ function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
-  const [activeNav, setActiveNav] = useState('Overview')
   const queryClient = useQueryClient()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const me = useQuery<User | null>({
     queryKey: ['me'],
-    queryFn: async () => { try { return await api('/api/auth/me') } catch { return null } },
+    queryFn: async () => { try { const data = await apiClient('/api/auth/me'); setApiCsrfToken(data.csrfToken); setCsrfToken(data.csrfToken); return data } catch { return null } },
   })
 
   const dashboard = useQuery({
     queryKey: ['dashboard', selectedShop],
     enabled: !!selectedShop && me.data?.role === 'MANAGER',
-    queryFn: () => api(`/api/shops/${selectedShop}/dashboard`),
+    queryFn: () => apiClient(`/api/shops/${selectedShop}/dashboard`),
   })
 
-  const notificationCenter = useQuery({ queryKey: ['notifications', selectedShop], enabled: !!selectedShop, queryFn: () => api(`/api/notifications/${selectedShop}?limit=10`) })
+  const notificationCenter = useQuery({ queryKey: ['notifications', selectedShop], enabled: !!selectedShop, queryFn: () => apiClient(`/api/notifications/${selectedShop}?limit=10`) })
 
   const login = useMutation({
-    mutationFn: async () => api('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }),
-    onSuccess: (data) => { setCsrfToken(data.csrfToken); setLoginError(''); queryClient.invalidateQueries({ queryKey: ['me'] }) },
+    mutationFn: async () => apiClient('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+    onSuccess: (data) => { setApiCsrfToken(data.csrfToken); setCsrfToken(data.csrfToken); setLoginError(''); queryClient.clear(); queryClient.invalidateQueries({ queryKey: ['me'] }) },
     onError: (error: Error) => setLoginError(error.message),
   })
 
-  const logout = useMutation({ mutationFn: async () => api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } }), onSuccess: () => { setCsrfToken(''); queryClient.setQueryData(['me'], null) } })
+  const logout = useMutation({ mutationFn: async () => apiClient('/api/auth/logout', { method: 'POST' }), onSuccess: () => { setApiCsrfToken(''); setCsrfToken(''); queryClient.clear(); queryClient.setQueryData(['me'], null) } })
 
-  const adminBranchesList = useQuery({ queryKey:['admin-branch-options'], enabled: me.data?.role === 'ADMIN', queryFn: () => api('/api/admin/branches?limit=100') })
+  const adminBranchesList = useQuery({ queryKey:['admin-branch-options'], enabled: me.data?.role === 'ADMIN', queryFn: () => apiClient('/api/admin/branches?limit=100') })
 
   useEffect(() => {
     if (!me.data) return
     if (me.data.role === 'ADMIN') {
-      setActiveNav((current) => current === 'Overview' ? 'Executive Dashboard' : current)
       const options = adminBranchesList.data?.items || []
       if (options[0]) setSelectedShop((current) => current || options[0].id)
     } else {
@@ -100,11 +95,18 @@ function App() {
   const completedTasks = taskRows?.filter((row) => row.status === 'COMPLETED').reduce((sum, row) => sum + row._count._all, 0)
   const inventoryAlerts = (dashboard.data?.inventoryAlerts as unknown[] | undefined)?.length
 
+  function navSlug(label: string) {
+    return label.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+  }
+
+  const pathSlug = location.pathname.split('/').filter(Boolean).pop() || ''
+  const activeNav = String(nav.find(([label]) => navSlug(String(label)) === pathSlug)?.[0] || nav[0][0])
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><UtensilsCrossed size={22} /></div><span>RestaurantOS</span></div>
-        <nav>{nav.map(([label, Icon]) => { const Component = Icon as typeof LayoutDashboard; return <button key={String(label)} className={String(label) === activeNav ? 'active' : ''} onClick={() => setActiveNav(String(label))}><Component size={19} /><span>{String(label)}</span></button> })}</nav>
+        <nav>{nav.map(([label, Icon]) => { const Component = Icon as typeof LayoutDashboard; return <button key={String(label)} className={String(label) === activeNav ? 'active' : ''} onClick={() => navigate(`/${navSlug(String(label))}`)}><Component size={19} /><span>{String(label)}</span></button> })}</nav>
         <button className="logout-button" onClick={() => logout.mutate()}><LogOut size={18} /> Sign out</button>
       </aside>
       <main className="workspace">
@@ -162,7 +164,7 @@ function App() {
           )}
         </section>
       </main>
-      <nav className="bottom-nav">{nav.slice(0, 5).map(([label, Icon]) => { const Component = Icon as typeof LayoutDashboard; return <button key={String(label)} className={String(label) === activeNav ? 'active' : ''} onClick={() => setActiveNav(String(label))}><Component size={20} /><span>{String(label).replace('Live Orders', 'Kitchen').replace('New Order', 'Order')}</span></button> })}</nav>
+      <nav className="bottom-nav">{nav.slice(0, 5).map(([label, Icon]) => { const Component = Icon as typeof LayoutDashboard; return <button key={String(label)} className={String(label) === activeNav ? 'active' : ''} onClick={() => navigate(`/${navSlug(String(label))}`)}><Component size={20} /><span>{String(label).replace('Live Orders', 'Kitchen').replace('New Order', 'Order')}</span></button> })}</nav>
     </div>
   )
 }
