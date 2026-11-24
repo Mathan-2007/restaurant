@@ -1,0 +1,651 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN_STAFF
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+}
+
+enum TaskStatus {
+  SCHEDULED
+  AVAILABLE
+  IN_PROGRESS
+  AWAITING_EVIDENCE
+  AWAITING_APPROVAL
+  COMPLETED
+  OVERDUE
+  REJECTED
+  CANCELLED
+}
+
+enum TaskAssignmentMode {
+  INDIVIDUAL
+  COLLABORATIVE
+  INDIVIDUAL_COPIES
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  ACCEPTED
+  PREPARING
+  PARTIALLY_READY
+  READY
+  SERVED
+  AWAITING_PAYMENT
+  PAID
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  AWAITING_ORDER
+  ORDER_IN_PROGRESS
+  AWAITING_PAYMENT
+  PAID
+  CLEANING
+  RESERVED
+  UNAVAILABLE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PrintStatus {
+  PENDING
+  PRINTED
+  FAILED
+  CANCELLED
+}
+
+enum RecurrenceType {
+  NONE
+  DAILY
+  WEEKLY
+  CUSTOM
+}
+
+model Role {
+  id    String   @id @default(cuid())
+  name  RoleName @unique
+  users User[]
+}
+
+model User {
+  id                  String                   @id @default(cuid())
+  email               String                   @unique
+  passwordHash        String
+  fullName            String
+  phone               String?
+  status              EmployeeStatus           @default(ACTIVE)
+  roleId              String
+  role                Role                     @relation(fields: [roleId], references: [id])
+  employeeAssignments EmployeeShopAssignment[]
+  managerAssignments  ManagerShopAssignment[]
+  sessions            Session[]
+  taskAssignments     TaskAssignmentMember[]
+  ordersCreated       Order[]                  @relation("OrderCreator")
+  revisions           OrderRevision[]
+  auditLogs           AuditLog[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  @@index([roleId, status])
+}
+
+model Shop {
+  id                  String                   @id @default(cuid())
+  code                String                   @unique
+  name                String
+  timezone            String                   @default("Asia/Kolkata")
+  isOpen              Boolean                  @default(false)
+  address             String?
+  phone               String?
+  settings            ShopSettings?
+  managerAssignments  ManagerShopAssignment[]
+  employeeAssignments EmployeeShopAssignment[]
+  tables              RestaurantTable[]
+  categories          MenuCategory[]
+  orders              Order[]
+  tasks               TaskAssignment[]
+  inventory           InventoryItem[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+}
+
+model ShopSettings {
+  id                          String  @id @default(cuid())
+  shopId                      String  @unique
+  shop                        Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  takeawayStartsBeforePayment Boolean @default(false)
+  currency                    String  @default("INR")
+  timezone                    String  @default("Asia/Kolkata")
+  taxPercent                  Decimal @default(0) @db.Decimal(5, 2)
+}
+
+model ManagerShopAssignment {
+  userId    String
+  shopId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, shopId])
+}
+
+model EmployeeShopAssignment {
+  userId String
+  shopId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@id([userId, shopId])
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  csrfTokenHash String
+  userAgent     String?
+  ipAddress     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, expiresAt, revokedAt])
+}
+
+model TaskTemplate {
+  id                 String                  @id @default(cuid())
+  shopId             String
+  title              String
+  description        String?
+  recurrence         RecurrenceType          @default(NONE)
+  photoRequired      Boolean                 @default(false)
+  requiredPhotoCount Int                     @default(0)
+  approvalRequired   Boolean                 @default(false)
+  active             Boolean                 @default(true)
+  checklists         TaskTemplateChecklist[]
+  schedules          TaskSchedule[]
+  createdAt          DateTime                @default(now())
+}
+
+model TaskTemplateChecklist {
+  id         String       @id @default(cuid())
+  templateId String
+  template   TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  label      String
+  isRequired Boolean      @default(true)
+  sortOrder  Int          @default(0)
+}
+
+model TaskSchedule {
+  id             String       @id @default(cuid())
+  templateId     String
+  template       TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  shopId         String
+  startsAt       DateTime
+  endsAt         DateTime
+  recurrenceRule String?
+  active         Boolean      @default(true)
+
+  @@index([shopId, startsAt, active])
+}
+
+model TaskAssignment {
+  id                 String                 @id @default(cuid())
+  shopId             String
+  shop               Shop                   @relation(fields: [shopId], references: [id])
+  title              String
+  description        String?
+  status             TaskStatus             @default(SCHEDULED)
+  completionMode     TaskAssignmentMode     @default(INDIVIDUAL)
+  scheduledStart     DateTime
+  scheduledEnd       DateTime
+  actualStart        DateTime?
+  completedAt        DateTime?
+  priority           Int                    @default(2)
+  photoRequired      Boolean                @default(false)
+  requiredPhotoCount Int                    @default(0)
+  approvalRequired   Boolean                @default(false)
+  members            TaskAssignmentMember[]
+  checklists         TaskChecklist[]
+  photoEvidence      TaskPhotoEvidence[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@index([shopId, status, scheduledStart])
+}
+
+model TaskAssignmentMember {
+  id           String         @id @default(cuid())
+  assignmentId String
+  assignment   TaskAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User           @relation(fields: [userId], references: [id])
+  status       TaskStatus     @default(SCHEDULED)
+
+  @@unique([assignmentId, userId])
+}
+
+model TaskChecklist {
+  id           String                  @id @default(cuid())
+  assignmentId String
+  assignment   TaskAssignment          @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  label        String
+  isRequired   Boolean                 @default(true)
+  sortOrder    Int                     @default(0)
+  responses    TaskChecklistResponse[]
+}
+
+model TaskChecklistResponse {
+  id          String        @id @default(cuid())
+  checklistId String
+  checklist   TaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  userId      String
+  completed   Boolean       @default(false)
+  completedAt DateTime?
+
+  @@unique([checklistId, userId])
+}
+
+model TaskPhotoEvidence {
+  id           String         @id @default(cuid())
+  assignmentId String
+  assignment   TaskAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  userId       String
+  fileName     String
+  mimeType     String
+  fileSize     Int
+  storagePath  String
+  createdAt    DateTime       @default(now())
+}
+
+model TaskCompletionRecord {
+  id           String   @id @default(cuid())
+  assignmentId String
+  shopId       String
+  userId       String
+  completedAt  DateTime @default(now())
+
+  @@index([shopId, completedAt])
+}
+
+model MenuCategory {
+  id        String     @id @default(cuid())
+  shopId    String
+  shop      Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int        @default(0)
+  active    Boolean    @default(true)
+  items     MenuItem[]
+
+  @@unique([shopId, name])
+}
+
+model MenuItem {
+  id             String             @id @default(cuid())
+  categoryId     String
+  category       MenuCategory       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  imageUrl       String?
+  active         Boolean            @default(true)
+  soldOut        Boolean            @default(false)
+  price          Decimal            @db.Decimal(12, 2)
+  variants       MenuItemVariant[]
+  addons         MenuItemAddon[]
+  availabilities MenuAvailability[]
+  orderItems     OrderItem[]
+}
+
+model MenuItemVariant {
+  id            String   @id @default(cuid())
+  itemId        String
+  item          MenuItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name          String
+  priceModifier Decimal  @db.Decimal(12, 2)
+}
+
+model MenuItemAddon {
+  id     String   @id @default(cuid())
+  itemId String
+  item   MenuItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name   String
+  price  Decimal  @db.Decimal(12, 2)
+}
+
+model MenuAvailability {
+  id       String    @id @default(cuid())
+  itemId   String
+  item     MenuItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  startsAt DateTime?
+  endsAt   DateTime?
+  active   Boolean   @default(true)
+}
+
+model RestaurantTable {
+  id       String         @id @default(cuid())
+  shopId   String
+  shop     Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  number   String
+  capacity Int
+  status   TableStatus    @default(AVAILABLE)
+  sessions TableSession[]
+
+  @@unique([shopId, number])
+}
+
+model TableSession {
+  id       String          @id @default(cuid())
+  tableId  String
+  table    RestaurantTable @relation(fields: [tableId], references: [id])
+  active   Boolean         @default(true)
+  openedAt DateTime        @default(now())
+  closedAt DateTime?
+  orders   Order[]
+}
+
+model Order {
+  id             String               @id @default(cuid())
+  shopId         String
+  shop           Shop                 @relation(fields: [shopId], references: [id])
+  orderNumber    String               @unique
+  type           OrderType
+  status         OrderStatus          @default(DRAFT)
+  tableSessionId String?
+  tableSession   TableSession?        @relation(fields: [tableSessionId], references: [id])
+  createdById    String
+  createdBy      User                 @relation("OrderCreator", fields: [createdById], references: [id])
+  version        Int                  @default(1)
+  subtotal       Decimal              @db.Decimal(12, 2)
+  tax            Decimal              @db.Decimal(12, 2)
+  total          Decimal              @db.Decimal(12, 2)
+  items          OrderItem[]
+  revisions      OrderRevision[]
+  invoices       Invoice[]
+  payments       Payment[]
+  kitchenTickets KitchenTicket[]
+  statusHistory  OrderStatusHistory[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([shopId, status, createdAt])
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId   String
+  menuItem     MenuItem @relation(fields: [menuItemId], references: [id])
+  nameSnapshot String
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  lineTotal    Decimal  @db.Decimal(12, 2)
+  instructions String?
+}
+
+model OrderRevision {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  revisionNumber Int
+  editedById     String
+  editedBy       User     @relation(fields: [editedById], references: [id])
+  reason         String?
+  beforeJson     Json
+  afterJson      Json
+  createdAt      DateTime @default(now())
+
+  @@unique([orderId, revisionNumber])
+}
+
+model OrderStatusHistory {
+  id          String      @id @default(cuid())
+  orderId     String
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status      OrderStatus
+  changedById String?
+  createdAt   DateTime    @default(now())
+}
+
+model KitchenTicket {
+  id             String              @id @default(cuid())
+  shopId         String
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id])
+  revisionNumber Int                 @default(1)
+  status         String              @default("NEW")
+  items          KitchenTicketItem[]
+  printJobs      PrintJob[]
+  createdAt      DateTime            @default(now())
+
+  @@index([shopId, status, createdAt])
+}
+
+model KitchenTicketItem {
+  id         String        @id @default(cuid())
+  ticketId   String
+  ticket     KitchenTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  name       String
+  quantity   Int
+  changeType String        @default("UNCHANGED")
+  status     String        @default("PENDING")
+}
+
+model Printer {
+  id         String     @id @default(cuid())
+  shopId     String
+  name       String
+  paperWidth Int        @default(80)
+  type       String
+  ipAddress  String?
+  active     Boolean    @default(true)
+  printJobs  PrintJob[]
+}
+
+model PrintJob {
+  id        String        @id @default(cuid())
+  shopId    String
+  printerId String
+  printer   Printer       @relation(fields: [printerId], references: [id])
+  ticketId  String
+  ticket    KitchenTicket @relation(fields: [ticketId], references: [id])
+  status    PrintStatus   @default(PENDING)
+  payload   String        @db.Text
+  attempts  Int           @default(0)
+  lastError String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([shopId, status, createdAt])
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  shopId        String
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id])
+  invoiceNumber String   @unique
+  subtotal      Decimal  @db.Decimal(12, 2)
+  tax           Decimal  @db.Decimal(12, 2)
+  discount      Decimal  @db.Decimal(12, 2)
+  total         Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now())
+
+  @@index([shopId, createdAt])
+}
+
+model PaymentMethod {
+  id     String  @id @default(cuid())
+  shopId String
+  code   String
+  name   String
+  active Boolean @default(true)
+
+  @@unique([shopId, code])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  shopId         String
+  orderId        String
+  order          Order         @relation(fields: [orderId], references: [id])
+  amount         Decimal       @db.Decimal(12, 2)
+  status         PaymentStatus @default(PENDING)
+  methodCode     String
+  reference      String?
+  idempotencyKey String        @unique
+  confirmedById  String?
+  createdAt      DateTime      @default(now())
+
+  @@index([shopId, status, createdAt])
+}
+
+model Refund {
+  id           String   @id @default(cuid())
+  shopId       String
+  paymentId    String
+  amount       Decimal  @db.Decimal(12, 2)
+  reason       String
+  approvedById String?
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+}
+
+model InventoryCategory {
+  id     String @id @default(cuid())
+  shopId String
+  name   String
+}
+
+model InventoryItem {
+  id           String                 @id @default(cuid())
+  shopId       String
+  shop         Shop                   @relation(fields: [shopId], references: [id])
+  categoryId   String
+  name         String
+  unit         String
+  quantity     Decimal                @db.Decimal(12, 3)
+  minimum      Decimal                @db.Decimal(12, 3)
+  transactions InventoryTransaction[]
+
+  @@index([shopId, quantity])
+}
+
+model InventoryTransaction {
+  id           String        @id @default(cuid())
+  itemId       String
+  item         InventoryItem @relation(fields: [itemId], references: [id])
+  userId       String
+  type         String
+  quantity     Decimal       @db.Decimal(12, 3)
+  balanceAfter Decimal       @db.Decimal(12, 3)
+  note         String?
+  createdAt    DateTime      @default(now())
+}
+
+model FoodPreparationRecord {
+  id          String    @id @default(cuid())
+  shopId      String
+  menuItemId  String
+  planned     Decimal   @db.Decimal(12, 3)
+  actual      Decimal   @db.Decimal(12, 3)
+  wasted      Decimal   @db.Decimal(12, 3)
+  startedAt   DateTime?
+  completedAt DateTime?
+  notes       String?
+}
+
+model RemainingFoodRecord {
+  id           String   @id @default(cuid())
+  shopId       String
+  menuItemId   String
+  expected     Decimal  @db.Decimal(12, 3)
+  actual       Decimal  @db.Decimal(12, 3)
+  discrepancy  Decimal  @db.Decimal(12, 3)
+  recordedById String
+  createdAt    DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id])
+  userId    String?
+  type      String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([shopId, userId, read, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  shopId       String?
+  shop         Shop?    @relation(fields: [shopId], references: [id])
+  actorId      String?
+  actor        User?    @relation(fields: [actorId], references: [id])
+  action       String
+  resourceType String
+  resourceId   String
+  requestId    String?
+  beforeJson   Json?
+  afterJson    Json?
+  createdAt    DateTime @default(now())
+
+  @@index([shopId, action, createdAt])
+}
+
+model IdempotencyKey {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  scope      String
+  resultJson Json?
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+}
+
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([processedAt, createdAt])
+}

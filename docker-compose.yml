@@ -1,0 +1,47 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: restaurant_management
+      MYSQL_USER: restaurant
+      MYSQL_PASSWORD: change-me
+      MYSQL_ROOT_PASSWORD: root-change-me
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot-change-me"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: mysql://restaurant:change-me@mysql:3306/restaurant_management
+      SESSION_SECRET: replace-with-at-least-32-random-characters
+      CSRF_SECRET: replace-with-a-different-random-secret
+      CORS_ORIGIN: http://localhost:8080
+      COOKIE_SECURE: "false"
+      LOG_LEVEL: info
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:
