@@ -6,10 +6,15 @@ const prisma = new PrismaClient();
 
 async function main() {
   if (process.env.NODE_ENV === 'production') throw new Error('Seed script cannot run in production');
+  if (process.env.SEED_RESET_CONFIRM !== 'YES_RESET_DEVELOPMENT_DATA') throw new Error('Destructive seed reset requires SEED_RESET_CONFIRM=YES_RESET_DEVELOPMENT_DATA');
   await prisma.outboxEvent.deleteMany();
   await prisma.auditLog.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.invoice.deleteMany();
+  await prisma.financialLedgerEntry.deleteMany();
+  await prisma.payroll.deleteMany();
+  await prisma.expense.deleteMany();
+  await prisma.purchaseItem.deleteMany();
+  await prisma.purchase.deleteMany();
+  await prisma.supplier.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
   await prisma.restaurantTable.deleteMany();
@@ -100,7 +105,30 @@ async function main() {
     }
   }
 
-  await prisma.auditLog.create({ data: { actorId: admin.id, action: 'SEED_CREATED', resourceType: 'database', resourceId: 'development', beforeJson: null, afterJson: { shops: 6, managers: 2 } } });
+  for (let month = 0; month < 12; month++) {
+    const date = new Date();
+    date.setUTCMonth(date.getUTCMonth() - month);
+    for (let shopIndex = 0; shopIndex < shops.length; shopIndex++) {
+      const shop = shops[shopIndex];
+      const supplier = await prisma.supplier.upsert({ where: { code: `SUP-${String(shopIndex + 1).padStart(2, '0')}` }, update: {}, create: { code: `SUP-${String(shopIndex + 1).padStart(2, '0')}`, name: `Branch ${shopIndex + 1} Fresh Supply`, phone: `987654${String(shopIndex).padStart(4, '0')}`, address: 'Development supplier address' } });
+      const purchaseTotal = 45000 + month * 650 + shopIndex * 1200;
+      await prisma.purchase.create({ data: { purchaseNumber: `PUR-${shop.code}-${String(month + 1).padStart(2, '0')}`, shopId: shop.id, supplierId: supplier.id, purchaseDate: date, subtotal: purchaseTotal.toFixed(2), discount: '500.00', tax: (purchaseTotal * 0.05).toFixed(2), transportCost: '600.00', total: (purchaseTotal - 500 + purchaseTotal * 0.05 + 600).toFixed(2), status: 'APPROVED', paymentStatus: month % 4 === 0 ? 'UNPAID' : 'PAID', purchasedById: managers[shopIndex % managers.length].id, approvedById: managers[shopIndex % managers.length].id, items: { create: [{ name: 'Vegetables and ingredients', quantity: '100.000', unit: 'KG', unitPrice: '450.00', lineTotal: '45000.00' }] } } });
+      for (const [category, amount] of [['Rent', 65000], ['Electricity', 12000 + month * 120], ['Water', 2500], ['Gas', 6000], ['Maintenance', 3500 + month * 80], ['Transportation', 4500]]) {
+        await prisma.expense.create({ data: { expenseNumber: `EXP-${shop.code}-${month}-${category.replace(' ', '')}`, shopId: shop.id, category, amount: amount.toFixed(2), expenseDate: date, status: 'APPROVED', paymentStatus: 'PAID', recurring: ['Rent', 'Electricity', 'Water', 'Gas'].includes(category), createdById: managers[shopIndex % managers.length].id, approvedById: managers[shopIndex % managers.length].id } });
+      }
+      await prisma.payroll.upsert({ where: { shopId_userId_periodStart_periodEnd: { shopId: shop.id, userId: managers[shopIndex % managers.length].id, periodStart: date, periodEnd: date } }, update: {}, create: { shopId: shop.id, userId: managers[shopIndex % managers.length].id, periodStart: date, periodEnd: date, baseSalary: '55000.00', overtime: '3000.00', allowance: '2000.00', bonus: month % 3 === 0 ? '5000.00' : '0.00', deduction: '1500.00', netPay: month % 3 === 0 ? '63500.00' : '58500.00', status: 'PAID', paidAt: date } });
+    }
+  }
+
+  for (const roleName of ['MANAGER', 'CASHIER', 'WAITER', 'KITCHEN_STAFF'] as const) {
+    for (const module of ['ORDERS', 'TASKS', 'MENU', 'INVENTORY', 'PAYMENTS', 'KITCHEN', 'USERS', 'REPORTS']) {
+      for (const action of ['VIEW', 'CREATE', 'UPDATE', 'APPROVE']) {
+        await prisma.permission.upsert({ where: { roleName_module_action: { roleName, module, action } }, update: {}, create: { roleName, module, action, allowed: roleName === 'MANAGER' || action === 'VIEW' } });
+      }
+    }
+  }
+
+  await prisma.auditLog.create({ data: { actorId: admin.id, action: 'SEED_CREATED', resourceType: 'database', resourceId: 'development', afterJson: { shops: 6, managers: 2 } } });
   console.log('Development seed completed');
   console.log('Test password: Dev@12345');
   console.log('Accounts: admin@restaurant.local, manager1@restaurant.local, cashier1@restaurant.local, waiter1@restaurant.local, kitchen-staff1@restaurant.local');

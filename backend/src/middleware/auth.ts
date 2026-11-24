@@ -20,7 +20,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
 export function requireRole(...roles: RoleName[]): RequestHandler {
   return (req, _res, next) => {
     if (!req.auth) return next(new ApiError(401, 'Authentication required', 'AUTH_REQUIRED'));
-    if (!roles.includes(req.auth.role)) return next(new ApiError(403, 'Insufficient permissions', 'FORBIDDEN_ROLE'));
+    if (req.auth.role !== 'ADMIN' && !roles.includes(req.auth.role)) return next(new ApiError(403, 'Insufficient permissions', 'FORBIDDEN_ROLE'));
     next();
   };
 }
